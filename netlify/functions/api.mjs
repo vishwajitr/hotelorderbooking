@@ -10,7 +10,9 @@ import db from '../../db.js';
 let ready; // reused while the function stays warm
 
 export default async req => {
-  ready ??= server.createApp(db.pgConn(Netlify.env.get('NETLIFY_DB_URL') || Netlify.env.get('DATABASE_URL')))
+  // Netlify hands site variables to modern functions on Netlify.env; server.js reads process.env
+  for (const k of ['OWNER_PASSWORD', 'SESSION_SECRET', 'HOTEL_TZ']) if (!process.env[k] && Netlify.env.has(k)) process.env[k] = Netlify.env.get(k);
+  ready ??=server.createApp(db.pgConn(Netlify.env.get('NETLIFY_DB_URL') || Netlify.env.get('DATABASE_URL')))
     .then(app => serverless(app))
     .catch(e => { ready = null; throw e; });
   try {
