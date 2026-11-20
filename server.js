@@ -1,12 +1,9 @@
-// HTTP API + static UI. Run standalone (`node server.js`, web/LAN/cloud) or started inside Electron (electron.js).
+// HTTP API. Runs as a Netlify Function (netlify/functions/api.js) or locally (dev.js).
+// Logins: OWNER_PASSWORD env var = owner (menu, settings); staff PIN set by the owner = staff (orders, billing, rooms, reports).
 const express = require('express');
 const crypto = require('crypto');
-const os = require('os');
 const path = require('path');
-const { EventEmitter } = require('events');
 const { openDb, totals } = require('./db');
-
-const LOCAL = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 const csv = rows => {
   if (!rows.length) return '';
@@ -20,104 +17,117 @@ const csv = rows => {
   return [cols.join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\n');
 };
 
-async function start(dbPath, port = 4600) {
-  const db = await openDb(dbPath);
-  const events = new EventEmitter().setMaxListeners(0);
-  const token = crypto.randomBytes(24).toString('hex'); // login cookie; a restart logs LAN devices out
-  const fails = new Map();
+const sha = s => crypto.createHash('sha256').update(String(s)).digest();
+const sameSecret = (a, b) => crypto.timingSafeEqual(sha(a), sha(b));
+const hashPin = pin => {
+  const salt = crypto.randomBytes(16).toString('hex');
+  return salt + ':' + crypto.scryptSync(pin, salt, 32).toString('hex');
+};
+const checkPin = (pin, stored) => {
+  if (!stored) return false;
+  const [salt, hash] = stored.split(':');
+  return crypto.timingSafeEqual(crypto.scryptSync(String(pin), salt, 32), Buffer.from(hash, 'hex'));
+};
+const httpError = (status, msg) => Object.assign(new Error(msg), { status });
+
+async function createApp(conn, { serveStatic = false } = {}) {
+  const db = await openDb(conn);
+  const OWNER = process.env.OWNER_PASSWORD;
+  // ponytail: stateless signed cookie; changing SESSION_SECRET logs everyone out (do that after changing the staff PIN)
+  const SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+  const sign = v => crypto.createHmac('sha256', SECRET).update(v).digest('hex');
+  const DAYS_30 = 30 * 864e5;
+  const readRole = req => {
+    const m = /(?:^|;\s*)session=([^;]+)/.exec(req.headers.cookie || '');
+    if (!m) return null;
+    const [role, exp, sig = ''] = m[1].split('.');
+    const want = sign(`${role}.${exp}`);
+    if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want)) || +exp < Date.now()) return null;
+    return role;
+  };
+  const setSession = (req, res, role) => {
+    const v = role ? `${role}.${Date.now() + DAYS_30}` : '';
+    const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
+    res.setHeader('Set-Cookie', `session=${v && v + '.' + sign(v)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${role ? DAYS_30 / 1000 : 0}${secure}`);
+  };
+
   const app = express();
   app.use(express.json());
-  app.use(express.static(path.join(__dirname, 'public')));
+  if (serveStatic) app.use(express.static(path.join(__dirname, 'public')));
 
-  // The counter PC itself (localhost) never needs the PIN. Other devices on the LAN do, and LAN access stays off until a PIN is set.
-  const isLocal = req => LOCAL.has(req.socket.remoteAddress);
-  const authed = req => isLocal(req) || (req.headers.cookie || '').split(/;\s*/).includes('auth=' + token);
-
-  app.post('/api/login', (req, res) => {
-    const ip = req.socket.remoteAddress, f = fails.get(ip) || { n: 0, until: 0 };
-    if (f.until > Date.now()) return res.status(429).json({ error: 'Too many wrong PINs. Wait 5 minutes.' });
-    const pin = db.settings().pin;
-    if (!pin) return res.status(403).json({ error: 'LAN access is off. Set a PIN in Settings on the counter PC.' });
-    const given = Buffer.from(String(req.body.pin || '')), want = Buffer.from(pin);
-    if (given.length === want.length && crypto.timingSafeEqual(given, want)) {
-      fails.delete(ip);
-      res.setHeader('Set-Cookie', `auth=${token}; HttpOnly; SameSite=Strict; Path=/`);
-      return res.json({ ok: true });
-    }
-    const n = f.n + 1;
-    fails.set(ip, n >= 5 ? { n: 0, until: Date.now() + 5 * 60e3 } : { n, until: 0 });
-    res.status(401).json({ error: 'Wrong PIN' });
-  });
-  app.use('/api', (req, res, next) => (authed(req) ? next() : res.status(401).json({ error: 'Login required' })));
-
-  const h = fn => (req, res) => {
-    try { res.json(fn(req)); }
-    catch (e) { if (!e.status) console.error(e); res.status(e.status || 500).json({ error: e.message }); }
+  const api = express.Router();
+  // Netlify may hand the function either the original /api/... path or its own /.netlify/functions/api/... path
+  app.use(['/api', '/.netlify/functions/api'], api);
+  const h = fn => async (req, res) => {
+    try { res.json(await fn(req, res)); }
+    catch (e) { if (!e.status) console.error(e); res.status(e.status || 500).json({ error: e.status ? e.message : 'Server error' }); }
   };
-  const changed = (r, kot) => { events.emit('change'); if (kot) events.emit('kot', r); return r; };
-  const id = req => +req.params.id;
-  const publicSettings = () => { const { pin, ...s } = db.settings(); return { ...s, has_pin: !!pin }; };
 
-  app.get('/api/info', h(req => ({
-    local: isLocal(req),
-    lan: Object.values(os.networkInterfaces()).flat()
-      .filter(i => (i.family === 'IPv4' || i.family === 4) && !i.internal).map(i => `http://${i.address}:${port}`),
-  })));
-  app.get('/api/settings', h(publicSettings));
-  app.put('/api/settings', h(req => {
-    if (!isLocal(req)) throw Object.assign(new Error('Settings can only be changed on the counter PC'), { status: 403 });
-    db.saveSettings(req.body);
-    return changed(publicSettings());
+  api.get('/me', h(req => ({ role: readRole(req), configured: !!OWNER })));
+  api.post('/login', h(async (req, res) => {
+    if (!OWNER) throw httpError(503, 'Server not set up: OWNER_PASSWORD is missing.');
+    const ip = req.headers['x-nf-client-connection-ip'] || req.ip;
+    if (await db.loginBlocked(ip)) throw httpError(429, 'Too many wrong attempts. Wait 15 minutes.');
+    const secret = String(req.body.secret || '');
+    let role = null;
+    if (secret && sameSecret(secret, OWNER)) role = 'owner';
+    else if (/^\d{6,8}$/.test(secret) && checkPin(secret, (await db.settings()).pin_hash)) role = 'staff';
+    if (!role) { await db.loginFailed(ip); throw httpError(401, 'Wrong PIN or password'); }
+    await db.loginOk(ip);
+    setSession(req, res, role);
+    return { role };
+  }));
+  api.post('/logout', h((req, res) => { setSession(req, res, null); return { ok: true }; }));
+
+  api.use((req, res, next) => {
+    req.role = readRole(req);
+    req.role ? next() : res.status(401).json({ error: 'Login required' });
+  });
+  const ownerOnly = (req, res, next) => (req.role === 'owner' ? next() : res.status(403).json({ error: 'Only the owner can do this' }));
+  const id = req => +req.params.id;
+  const publicSettings = async () => { const { pin_hash, ...s } = await db.settings(); return { ...s, has_pin: !!pin_hash }; };
+
+  api.get('/settings', h(publicSettings));
+  api.put('/settings', ownerOnly, h(async req => {
+    const { pin } = req.body;
+    if (pin && !/^\d{6,8}$/.test(pin)) throw httpError(400, 'Staff PIN must be 6 to 8 digits');
+    await db.saveSettings(req.body, pin ? hashPin(pin) : null);
+    return publicSettings();
   }));
 
-  app.get('/api/menu', h(() => db.menu()));
-  app.post('/api/menu', h(req => changed(db.addMenuItem(req.body))));
-  app.put('/api/menu/:id', h(req => changed(db.updateMenuItem(id(req), req.body))));
+  api.get('/menu', h(() => db.menu()));
+  api.post('/menu', ownerOnly, h(req => db.addMenuItem(req.body)));
+  api.put('/menu/:id', ownerOnly, h(req => db.updateMenuItem(id(req), req.body)));
 
-  app.get('/api/orders', h(() => db.activeOrders()));
-  app.get('/api/orders/:id', h(req => {
-    const o = db.order(id(req));
+  api.get('/orders', h(() => db.activeOrders()));
+  api.get('/orders/:id', h(async req => {
+    const o = await db.order(id(req));
     // ?discount=N previews totals before billing; the real discount is validated and saved by /bill
     if (req.query.discount !== undefined && o.status !== 'billed')
       o.totals = totals(o.items, Math.min(Math.max(+req.query.discount || 0, 0), o.totals.subtotal));
     return o;
   }));
-  app.post('/api/orders', h(req => changed(db.createOrder(req.body), true)));
-  app.post('/api/orders/:id/items', h(req => changed(db.addItems(id(req), req.body.items), true)));
-  app.post('/api/orders/:id/status', h(req => changed(db.setStatus(id(req), req.body.status, req.body.reason))));
-  app.post('/api/orders/:id/bill', h(req => changed(db.bill(id(req), req.body))));
+  api.post('/orders', h(req => db.createOrder(req.body)));
+  api.post('/orders/:id/items', h(req => db.addItems(id(req), req.body.items)));
+  api.post('/orders/:id/status', h(req => db.setStatus(id(req), req.body.status, req.body.reason)));
+  api.post('/orders/:id/bill', h(req => db.bill(id(req), req.body)));
+  api.get('/kots', h(req => db.kots(req.query.after)));
 
-  app.get('/api/folios', h(() => db.openFolios()));
-  app.get('/api/folios/:id', h(req => db.folio(id(req))));
-  app.post('/api/folios', h(req => changed(db.openFolio(req.body))));
-  app.post('/api/folios/:id/settle', h(req => changed(db.settleFolio(id(req), req.body.mode))));
+  api.get('/folios', h(() => db.openFolios()));
+  api.get('/folios/:id', h(req => db.folio(id(req))));
+  api.post('/folios', h(req => db.openFolio(req.body)));
+  api.post('/folios/:id/settle', h(req => db.settleFolio(id(req), req.body.mode)));
 
-  app.get('/api/reports/:name', (req, res) => {
+  api.get('/reports/:name', async (req, res) => {
     const { from, to } = req.query;
     try {
-      const rows = db.report(req.params.name, from, to);
-      if (!req.query.csv) return res.json(rows);
+      const rows = await db.report(req.params.name, from, to);
+      if (!req.query.csv || !Array.isArray(rows)) return res.json(rows);
       res.type('text/csv').attachment(`${req.params.name}_${from}_${to}.csv`).send(csv(rows));
-    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+    } catch (e) { res.status(e.status || 500).json({ error: e.status ? e.message : 'Server error' }); }
   });
 
-  // Server-Sent Events: every open screen refreshes when anything changes.
-  app.get('/api/events', (req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    res.write('retry: 3000\n\n');
-    const send = () => res.write('data: change\n\n');
-    events.on('change', send);
-    req.on('close', () => events.off('change', send));
-  });
-
-  await new Promise((ok, fail) => app.listen(port, '0.0.0.0', ok).on('error', fail));
-  return { db, events, port };
+  return app;
 }
 
-module.exports = { start };
-
-if (require.main === module) {
-  start(process.env.DB || path.join(__dirname, 'hotel.db'), +process.env.PORT || 4600)
-    .then(({ port }) => console.log(`Hotel Orders running at http://localhost:${port}`))
-    .catch(e => { console.error(e.message); process.exit(1); });
-}
+module.exports = { createApp };

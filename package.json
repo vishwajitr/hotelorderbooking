@@ -1,34 +1,52 @@
 {
   "name": "hotelorderbooking",
   "version": "1.0.0",
-  "description": "Hotel order booking: orders, KOT, GST bills, room folios. Runs as a web app and a desktop app.",
+  "description": "Hotel order booking: orders, KOT, GST bills, room folios. Web app on Netlify + desktop app with silent printing.",
   "main": "electron.js",
   "scripts": {
     "start": "electron .",
-    "serve": "node server.js",
-    "test": "node db.js",
+    "serve": "node dev.js",
+    "test": "node test.js",
     "dist": "electron-builder --mac --win"
   },
   "build": {
     "appId": "com.hotelorderbooking.app",
     "productName": "Hotel Orders",
     "files": [
-      "*.js",
-      "public/**"
+      "electron.js",
+      "preload.js"
     ],
     "mac": {
-      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }]
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
     },
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }]
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     }
   },
   "dependencies": {
     "express": "^4.22.3",
-    "sql.js": "^1.17.0"
+    "pg": "^8.23.1",
+    "serverless-http": "^4.0.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.17",
     "electron": "^45.4.1",
     "electron-builder": "^26.18.0"
-  }
+  },
+  "hotelUrl": ""
 }
