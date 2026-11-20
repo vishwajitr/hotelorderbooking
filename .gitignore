@@ -1,0 +1,4 @@
+node_modules/
+dist/
+hotel.db
+hotel.db.tmp

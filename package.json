@@ -1,0 +1,34 @@
+{
+  "name": "hotelorderbooking",
+  "version": "1.0.0",
+  "description": "Hotel order booking: orders, KOT, GST bills, room folios. Runs as a web app and a desktop app.",
+  "main": "electron.js",
+  "scripts": {
+    "start": "electron .",
+    "serve": "node server.js",
+    "test": "node db.js",
+    "dist": "electron-builder --mac --win"
+  },
+  "build": {
+    "appId": "com.hotelorderbooking.app",
+    "productName": "Hotel Orders",
+    "files": [
+      "*.js",
+      "public/**"
+    ],
+    "mac": {
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  },
+  "dependencies": {
+    "express": "^4.22.3",
+    "sql.js": "^1.17.0"
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
+  }
+}

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hotel Orders</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav>
+    <b id="hotel">Hotel Orders</b>
+    <button data-tab="new">New Order</button>
+    <button data-tab="live">Live <span id="liveCount" class="badge"></span></button>
+    <button data-tab="rooms">Rooms</button>
+    <button data-tab="reports">Reports</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+
+  <main>
+    <section id="new">
+      <div id="orderHead" class="row">
+        <select id="kind" aria-label="Order type">
+          <option value="table">Table</option><option value="room">Room</option><option value="takeaway">Takeaway</option>
+        </select>
+        <input id="ref" placeholder="Table / room no." aria-label="Table or room number">
+      </div>
+      <div id="adding" class="notice" hidden>Adding items to <b id="addingLabel"></b> <button id="cancelAdd">Cancel</button></div>
+      <div class="split">
+        <div>
+          <input id="search" type="search" placeholder="Search menu" aria-label="Search menu">
+          <div id="menuGrid"></div>
+        </div>
+        <aside>
+          <h3>Cart</h3>
+          <div id="cart"></div>
+          <textarea id="note" placeholder="Note for kitchen" aria-label="Note for kitchen"></textarea>
+          <button id="saveOrder" class="primary">Save &amp; send KOT</button>
+        </aside>
+      </div>
+    </section>
+
+    <section id="live" hidden>
+      <div class="board">
+        <div><h3>New</h3><div id="col-new"></div></div>
+        <div><h3>Preparing</h3><div id="col-preparing"></div></div>
+        <div><h3>Served</h3><div id="col-served"></div></div>
+      </div>
+    </section>
+
+    <section id="rooms" hidden>
+      <form id="folioForm" class="row">
+        <input name="room_no" placeholder="Room no." required aria-label="Room number">
+        <input name="guest" placeholder="Guest name" aria-label="Guest name">
+        <button>Open room bill</button>
+      </form>
+      <div id="folios" class="cards"></div>
+    </section>
+
+    <section id="reports" hidden>
+      <div class="row">
+        <select id="rName" aria-label="Report">
+          <option value="dayend">Day-end summary</option>
+          <option value="items">Item-wise sales</option>
+          <option value="cancelled">Cancelled orders</option>
+        </select>
+        <input type="date" id="rFrom" aria-label="From"> <input type="date" id="rTo" aria-label="To">
+        <button id="rShow" class="primary">Show</button>
+        <a id="rCsv" class="btn">Download CSV</a>
+      </div>
+      <div id="rOut"></div>
+    </section>
+
+    <section id="settings" hidden>
+      <h3>Menu</h3>
+      <form id="menuForm" class="row">
+        <input name="category" placeholder="Category" aria-label="Category">
+        <input name="item" placeholder="Item name" required aria-label="Item name">
+        <input name="price" type="number" step="0.01" min="0" placeholder="Price" required aria-label="Price">
+        <label>GST % <input name="gst_pct" type="number" step="0.01" min="0" max="28" value="5" class="short"></label>
+        <label><input type="checkbox" name="veg" checked> Veg</label>
+        <button class="primary">Add item</button>
+      </form>
+      <div class="scroll"><table id="menuTable"></table></div>
+
+      <h3>Hotel &amp; printing</h3>
+      <form id="settingsForm">
+        <fieldset class="grid">
+          <label>Hotel name <input name="hotel_name"></label>
+          <label>Address <input name="address"></label>
+          <label>GSTIN <input name="gstin"></label>
+          <label>Paper width <select name="paper_width"><option value="80">80 mm</option><option value="58">58 mm</option></select></label>
+          <label class="desktop-only">Printer <select name="printer"></select></label>
+          <label class="desktop-only"><input type="checkbox" name="auto_kot"> Print KOT automatically on this PC</label>
+          <label>LAN PIN <input name="pin" type="password" inputmode="numeric" placeholder="4–8 digits, blank = keep" autocomplete="new-password"></label>
+          <button class="primary">Save settings</button>
+        </fieldset>
+      </form>
+      <label class="browser-only"><input type="checkbox" id="kotHere"> Print KOTs from this browser</label>
+      <p id="lan" class="notice"></p>
+    </section>
+  </main>
+
+  <dialog id="dlg"></dialog>
+  <dialog id="login">
+    <form id="loginForm">
+      <h3>Enter PIN</h3>
+      <input name="pin" type="password" inputmode="numeric" autocomplete="current-password" aria-label="PIN" required>
+      <button class="primary">Log in</button>
+      <p id="loginErr" class="error"></p>
+    </form>
+  </dialog>
+  <script src="app.js"></script>
+</body>
+</html>

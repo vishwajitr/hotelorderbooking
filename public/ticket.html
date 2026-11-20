@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ticket</title>
+<!-- One template for KOT, bill and room statement. ?type=kot|bill|folio&id=N[&kot=N][&auto=1] -->
+<style>
+  @page { margin: 0; }
+  body { font: 12px/1.35 "Courier New", monospace; margin: 0; padding: 3mm; width: 80mm; color: #000; }
+  body.w58 { width: 58mm; font-size: 11px; }
+  h1 { font-size: 15px; margin: 0; }
+  hr { border: 0; border-top: 1px dashed #000; margin: 4px 0; }
+  table { width: 100%; border-collapse: collapse; }
+  td { vertical-align: top; padding: 1px 0; }
+  .c { text-align: center; } .r { text-align: right; white-space: nowrap; }
+  .big { font-size: 15px; font-weight: bold; }
+</style>
+</head>
+<body>
+<div id="t">Loading…</div>
+<script>
+const q = new URLSearchParams(location.search), type = q.get('type'), id = +q.get('id'), kot = +q.get('kot') || 0;
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = n => (+n || 0).toFixed(2);
+const label = o => esc(o.kind === 'takeaway' ? 'Takeaway' : `${o.kind === 'room' ? 'Room' : 'Table'} ${o.ref}`);
+const row = (k, v, cls = '') => `<tr class="${cls}"><td>${k}</td><td class="r">${money(v)}</td></tr>`;
+const get = u => fetch(u).then(r => r.json().then(d => { if (!r.ok) throw new Error(d.error); return d; }));
+const head = s => `<div class="c"><h1>${esc(s.hotel_name)}</h1>${esc(s.address)}${s.gstin ? '<br>GSTIN: ' + esc(s.gstin) : ''}</div><hr>`;
+
+function kotHtml(o) {
+  const items = o.items.filter(i => !kot || i.kot_no === kot);
+  return `<div class="c big">KOT ${kot ? '#' + kot : '(all items)'}</div>
+    <div class="big">${label(o)}</div>Order #${o.id} · ${new Date().toLocaleString('en-IN')}<hr>
+    <table>${items.map(i => `<tr class="big"><td>${i.qty} x</td><td>${esc(i.name)}</td></tr>`).join('')}</table>
+    ${o.note ? `<hr>Note: ${esc(o.note)}` : ''}<hr>`;
+}
+function billHtml(s, o) {
+  const t = o.totals, billed = o.status === 'billed';
+  return head(s) + `<div class="c big">${billed ? 'TAX INVOICE' : 'ESTIMATE (not billed)'}</div>
+    Bill: ${esc(o.bill_no || '-')}<br>${label(o)}<br>${esc(o.billed_at || new Date().toLocaleString('en-IN'))}<hr>
+    <table><tr><td>Item</td><td class="r">Qty</td><td class="r">Amount</td></tr>
+    ${o.items.map(i => `<tr><td>${esc(i.name)}</td><td class="r">${i.qty}</td><td class="r">${money(i.price * i.qty)}</td></tr>`).join('')}</table><hr>
+    <table>${row('Subtotal', t.subtotal)}${t.discount ? row('Discount', -t.discount) : ''}${row('CGST', t.cgst)}${row('SGST', t.sgst)}</table><hr>
+    <table>${row('TOTAL', t.total, 'big')}</table>
+    ${billed ? `Paid: ${o.pay_mode === 'room' ? 'Charged to room' : esc(o.pay_mode.toUpperCase())}` : ''}<hr><div class="c">Thank you! Visit again.</div>`;
+}
+function folioHtml(s, f) {
+  return head(s) + `<div class="c big">ROOM ${esc(f.room_no)} STATEMENT</div>
+    ${f.guest ? 'Guest: ' + esc(f.guest) + '<br>' : ''}Opened: ${esc(f.opened_at)}
+    ${f.settled_at ? `<br>Settled: ${esc(f.settled_at)} (${esc(f.settle_mode.toUpperCase())})` : ''}<hr>
+    <table>${f.orders.map(o => `<tr><td>${esc(o.bill_no)}<br>${esc(o.billed_at)}</td><td class="r">${money(o.total)}</td></tr>`).join('')}</table><hr>
+    <table>${row('TOTAL', f.total, 'big')}</table><hr><div class="c">Thank you for staying with us!</div>`;
+}
+
+(async () => {
+  try {
+    const s = await get('/api/settings');
+    if (s.paper_width === '58') document.body.className = 'w58';
+    const html = type === 'folio' ? folioHtml(s, await get('/api/folios/' + id))
+      : type === 'bill' ? billHtml(s, await get('/api/orders/' + id))
+      : kotHtml(await get('/api/orders/' + id));
+    document.getElementById('t').innerHTML = html;
+    document.title = 'ready'; // Electron waits for this before printing
+    if (q.get('auto')) { window.onafterprint = () => window.close(); window.print(); }
+  } catch (e) {
+    document.getElementById('t').textContent = e.message;
+    document.title = 'error: ' + e.message;
+  }
+})();
+</script>
+</body>
+</html>
