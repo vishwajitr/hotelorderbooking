@@ -262,6 +262,7 @@ async function runReport() {
   const fmt = d => new Date(d + 'T12:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   $('#rSub').textContent = from === to ? fmt(from) : `${fmt(from)} to ${fmt(to)}`;
   $('#rCsv').href = `/api/reports/${name}?${qs}&csv=1`;
+  if (name === 'bills') return renderBills(await api(`/reports/bills?${qs}`));
   if (name !== 'dayend') {
     const rows = await api(`/reports/${name}?${qs}`);
     if (!rows.length) return ($('#rOut').innerHTML = '<div class="empty">Nothing for these dates.</div>');
@@ -291,6 +292,27 @@ async function runReport() {
       <section class="panel"><h2>By payment</h2>${split(s.byPay, PAY_NAMES)}</section>
     </div>`;
 }
+function renderBills(rows) {
+  if (!rows.length) return ($('#rOut').innerHTML = '<div class="empty">No bills for these dates.</div>');
+  const live = rows.filter(r => r.status === 'billed');
+  $('#rOut').innerHTML = `<div class="panel"><div class="heading-row between"><h2>${rows.length} bills</h2>
+      <span class="muted small">${inr(live.reduce((s, r) => s + r.total, 0))} excluding void bills</span></div>
+    <div class="scroll"><table class="data"><thead><tr><th>Bill</th><th>Time</th><th>For</th><th>Payment</th><th>By</th><th class="num">Total</th><th></th></tr></thead><tbody>
+    ${rows.map(r => `<tr><td><b>${esc(r.bill_no)}</b></td><td>${esc(r.billed_at.slice(11, 16))}</td><td>${esc(r.for)}</td><td>${esc(PAY_NAMES[r.payment] || r.payment)}</td>
+      <td>${esc(r.billed_by)}</td><td class="num">${inr(r.total)}</td>
+      <td>${r.status === 'void' ? `<span class="status-void" title="${esc(r.void_reason)}">VOID</span> <span class="muted small">${esc(r.void_reason)}</span>`
+        : `<button class="btn" data-print="${r.id}">Reprint</button>${role === 'owner' ? ` <button class="btn" data-void="${r.id}" data-no="${esc(r.bill_no)}">Void</button>` : ''}`}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+}
+$('#rOut').onclick = async e => {
+  const p = e.target.closest('[data-print]');
+  if (p) return print('bill', +p.dataset.print);
+  const v = e.target.closest('[data-void]');
+  if (!v) return;
+  const f = await ask(`Void bill ${esc(v.dataset.no)}?`, `<p class="muted">The bill number stays used and the bill drops out of sales and GST totals. This can't be undone.</p>
+    <label class="field">Reason<input name="reason" required placeholder="e.g. wrong items billed"></label>`, 'Void bill');
+  if (f) { await api(`/orders/${+v.dataset.void}/void`, f); runReport(); }
+};
 $('#rForm').onsubmit = e => { e.preventDefault(); runReport(); };
 $('#rName').onchange = runReport;
 
@@ -382,9 +404,6 @@ async function loadSettings() {
   $('#hotel').textContent = settings.hotel_name;
   document.title = settings.hotel_name;
   $('#login .display').textContent = settings.hotel_name;
-  $('#pinNote').textContent = settings.has_pin
-    ? 'Staff log in with the staff PIN. You log in with the owner password.'
-    : 'No staff PIN yet. Set one so staff can log in without the owner password.';
   if (window.desktop) {
     const printers = await window.desktop.printers();
     $('#printer').innerHTML = '<option value="">System default</option>' +
@@ -396,12 +415,47 @@ $('#settingsForm').onsubmit = async e => {
   e.preventDefault();
   const body = Object.fromEntries(new FormData(e.target));
   body.paper_width = paper;
-  if (!body.pin) delete body.pin;
   await api('/settings', body, 'PUT');
-  e.target.elements.pin.value = '';
   await loadSettings();
   alert('Settings saved');
 };
+// ---------- people & security (owner) ----------
+async function loadStaff() {
+  const staff = await api('/staff');
+  $('#staffList').innerHTML = staff.map(s => `<div class="staff-row ${s.active ? '' : 'off'}"><b>${esc(s.name)}</b>
+    <button type="button" class="btn" data-pin="${s.id}" data-name="${esc(s.name)}">Change PIN</button>
+    <button type="button" role="switch" class="switch" data-staff="${s.id}" aria-checked="${!!s.active}" aria-label="${esc(s.name)} can log in"><span></span></button></div>`).join('')
+    || '<p class="muted small">No staff yet. Add each person below with their own PIN.</p>';
+}
+$('#staffForm').onsubmit = async e => {
+  e.preventDefault();
+  await api('/staff', Object.fromEntries(new FormData(e.target)));
+  e.target.reset();
+  loadStaff();
+};
+$('#staffList').onclick = async e => {
+  const sw = e.target.closest('[data-staff]'), pin = e.target.closest('[data-pin]');
+  if (sw) { await api('/staff/' + sw.dataset.staff, { active: sw.getAttribute('aria-checked') !== 'true' }, 'PUT'); return loadStaff(); }
+  if (!pin) return;
+  const f = await ask(`New PIN for ${esc(pin.dataset.name)}`, `<label class="field">PIN (6–8 digits)<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{6,8}" required autocomplete="new-password"></label>
+    <p class="muted small">Every device will be logged out, so the old PIN stops working everywhere.</p>`, 'Save PIN');
+  if (f) { await api('/staff/' + pin.dataset.pin, f, 'PUT'); alert('PIN changed. Everyone else has been logged out.'); }
+};
+$('#ownerPwForm').onsubmit = async e => {
+  e.preventDefault();
+  const r = await api('/owner-password', Object.fromEntries(new FormData(e.target)));
+  e.target.reset();
+  $('#starterBanner').hidden = !r.resetFlagStillOn;
+  alert(r.resetFlagStillOn ? 'Password saved, but RESET_OWNER_PASSWORD is still on in Netlify, so the starter password also works. Remove that setting.'
+    : 'Password changed. Other devices have been logged out.');
+};
+$('#logoutAll').onclick = async () => {
+  if (!confirm('Log out every phone, tablet and computer? Staff will need their PIN again.')) return;
+  await api('/logout-all', {});
+  alert('Done. Every other device is logged out.');
+};
+$('#goSecurity').onclick = () => { show('settings'); $('#security').scrollIntoView({ behavior: 'smooth' }); };
+
 // per-device settings live in this browser/PC, not in the shared database
 function renderPrintStatus() {
   const on = localStorage.autoKot === '1';
@@ -409,17 +463,19 @@ function renderPrintStatus() {
   $('#printStatus').textContent = (on ? 'KOTs print here' : 'KOTs don’t print here') + ` · ${settings.paper_width || 80} mm`;
 }
 $('#printer').onchange = e => (localStorage.printer = e.target.value);
-$('#autoKot').onclick = () => { localStorage.autoKot = localStorage.autoKot === '1' ? '0' : '1'; kotAfter = null; renderPrintStatus(); };
+$('#autoKot').onclick = () => { localStorage.autoKot = localStorage.autoKot === '1' ? '0' : '1'; kotAfter = null; localStorage.removeItem('kotAfter'); renderPrintStatus(); };
 document.body.classList.add(window.desktop ? 'is-desktop' : 'is-browser');
 
-// Devices with automatic KOT printing on check for new KOTs on every refresh.
-// ponytail: starts from "now" when the page loads; KOTs made while this device was closed are not printed.
-let kotAfter = null;
+// Devices with automatic KOT printing on check for new KOTs on every refresh. The last one printed is remembered on
+// this device, so KOTs made while it was closed still print when it reopens (only those from the last 2 hours).
+let kotAfter = localStorage.kotAfter ?? null;
+const RECENT = 2 * 3600e3;
 async function pollKots() {
   if (localStorage.autoKot !== '1') return;
   const r = await api('/kots' + (kotAfter == null ? '' : '?after=' + kotAfter));
-  if (kotAfter != null) for (const k of r.kots) await print('kot', k.order_id, k.kot_no);
-  kotAfter = r.last;
+  if (kotAfter != null) for (const k of r.kots)
+    if (!k.created_at || Date.now() - new Date(k.created_at.replace(' ', 'T') + '+05:30') < RECENT) await print('kot', k.order_id, k.kot_no);
+  localStorage.kotAfter = kotAfter = r.last;
 }
 
 // ---------- boot ----------
@@ -431,9 +487,13 @@ async function refresh() {
 let started = false;
 async function boot() {
   try {
-    ({ role } = await api('/me'));
+    const me = await api('/me');
+    role = me.role;
     if (!role) return $('#login').showModal();
     document.body.classList.toggle('is-owner', role === 'owner');
+    $('#who').textContent = me.name;
+    $('#starterBanner').hidden = !me.starterPassword;
+    if (role === 'owner') loadStaff().catch(() => {});
     await loadSettings();
     await refresh();
     await pollKots();

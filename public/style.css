@@ -226,3 +226,14 @@ body:not(.is-owner) .owner-only { display: none !important; }
   .cart-lines { max-height: none; }
   .bill-preview { height: 360px; }
 }
+
+/* handover additions */
+.banner { background: var(--warn-bg); color: var(--nonveg); font-weight: 600; font-size: 14px; padding: 10px 24px; border-bottom: 1px solid var(--accent-border); }
+.banner .link { color: var(--nonveg); }
+.staff-list { display: flex; flex-direction: column; }
+.staff-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line2); }
+.staff-row:first-child { border-top: 0; }
+.staff-row b { flex: 1; } .staff-row.off b { color: var(--muted); text-decoration: line-through; }
+.security-form { display: flex; flex-direction: column; gap: 12px; }
+.status-void { color: var(--nonveg); font-weight: 700; }
+#who:empty { display: none; }

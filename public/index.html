@@ -20,10 +20,14 @@
     </nav>
     <div class="topbar-right">
       <span id="printStatus" class="muted small"></span>
+      <span id="who" class="chip"></span>
       <button id="logout" class="btn">Log out</button>
     </div>
   </header>
 
+  <div id="starterBanner" class="banner" role="status" hidden>
+    You're using the starter owner password. <button type="button" class="link" id="goSecurity">Set your own password</button> before handing the app over.
+  </div>
   <main>
     <!-- New order -->
     <section id="new" class="pos">
@@ -105,7 +109,7 @@
         <div><h1 id="rTitle" class="display">Day-end summary</h1><p id="rSub" class="muted"></p></div>
         <form id="rForm" class="inline-form plain" aria-label="Report filters">
           <label class="field">Report<select id="rName">
-            <option value="dayend">Day-end summary</option><option value="items">Item-wise sales</option><option value="cancelled">Cancelled orders</option></select></label>
+            <option value="dayend">Day-end summary</option><option value="items">Item-wise sales</option><option value="bills">Bill register</option><option value="cancelled">Cancelled orders</option></select></label>
           <label class="field">From<input type="date" id="rFrom"></label>
           <label class="field">To<input type="date" id="rTo"></label>
           <button class="btn dark">Show</button>
@@ -166,11 +170,35 @@
               <button type="button" data-w="80" aria-pressed="true">80 mm</button>
               <button type="button" data-w="58" aria-pressed="false">58 mm</button>
             </div></div>
-          <hr>
-          <label class="field">Staff PIN<input name="pin" type="password" inputmode="numeric" placeholder="6–8 digits, blank keeps current" autocomplete="new-password" class="spaced"></label>
-          <p id="pinNote" class="muted small"></p>
           <button class="btn dark">Save settings</button>
         </form>
+
+        <section id="security" class="card pad owner-only" aria-labelledby="secH">
+          <h2 id="secH" class="display">People &amp; security</h2>
+          <div>
+            <div class="strong">Staff</div>
+            <p class="muted small">Each person logs in with their own PIN, so bills and cancellations show who did them.</p>
+          </div>
+          <div id="staffList" class="staff-list"></div>
+          <form id="staffForm" class="inline-form plain" aria-label="Add a staff member">
+            <label class="field grow">Name<input name="name" required placeholder="e.g. Ravi"></label>
+            <label class="field">PIN<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{6,8}" title="6 to 8 digits" required placeholder="6–8 digits" class="w-sm spaced" autocomplete="new-password"></label>
+            <button class="btn primary">Add</button>
+          </form>
+          <hr>
+          <form id="ownerPwForm" class="security-form" aria-label="Change owner password">
+            <div class="strong">Owner password</div>
+            <label class="field">Current password<input name="current" type="password" required autocomplete="current-password"></label>
+            <label class="field">New password<input name="next" type="password" required minlength="8" autocomplete="new-password" placeholder="At least 8 characters"></label>
+            <button class="btn dark">Change password</button>
+          </form>
+          <hr>
+          <div class="row">
+            <button type="button" id="logoutAll" class="btn">Log out all devices</button>
+            <a id="backupBtn" class="btn" href="/api/backup">Download backup</a>
+          </div>
+          <p class="muted small">Logging out all devices also happens automatically when a PIN or the owner password changes. Keep a backup somewhere safe every week.</p>
+        </section>
       </div>
     </section>
   </main>

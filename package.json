@@ -14,7 +14,8 @@
     "productName": "Hotel Orders",
     "files": [
       "electron.js",
-      "preload.js"
+      "preload.js",
+      "setup.html"
     ],
     "mac": {
       "target": [
@@ -49,5 +50,5 @@
     "electron": "^45.4.1",
     "electron-builder": "^26.18.0"
   },
-  "hotelUrl": ""
+  "hotelUrl": "https://hotelorderbooking.netlify.app"
 }

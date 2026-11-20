@@ -15,6 +15,14 @@ create table if not exists room_folios(id serial primary key, room_no text not n
   opened_at text not null, settled_at text, settle_mode text);
 create table if not exists settings(key text primary key, value text not null);
 create table if not exists login_attempts(ip text primary key, n integer not null default 0, until double precision not null default 0);
+create table if not exists staff(id serial primary key, name text not null, pin_hash text not null, active integer not null default 1);
+alter table orders add column if not exists created_by text;
+alter table orders add column if not exists billed_by text;
+alter table orders add column if not exists cancelled_by text;
+alter table orders add column if not exists void_reason text;
+alter table orders add column if not exists voided_by text;
+alter table orders add column if not exists voided_at text;
+alter table order_items add column if not exists created_at text;
 `;
 
 const KINDS = ['table', 'room', 'takeaway'];
@@ -75,11 +83,36 @@ async function openDb(conn) {
 
   // settings
   const settings = async (q = R) => ({ ...DEFAULTS, ...Object.fromEntries((await q.all('select key, value from settings')).map(r => [r.key, r.value])) });
-  const saveSettings = tx(async (q, obj, pinHash) => {
-    const set = (k, v) => q.run('insert into settings(key, value) values(?, ?) on conflict(key) do update set value = excluded.value', [k, String(v)]);
-    for (const k of Object.keys(DEFAULTS)) if (obj[k] != null) await set(k, obj[k]);
-    if (pinHash) await set('pin_hash', pinHash);
+  const put = (q, k, v) => q.run('insert into settings(key, value) values(?, ?) on conflict(key) do update set value = excluded.value', [k, String(v)]);
+  const saveSettings = tx(async (q, obj) => {
+    for (const k of Object.keys(DEFAULTS)) if (obj[k] != null) await put(q, k, obj[k]);
     return settings(q);
+  });
+  const setSetting = tx((q, k, v) => put(q, k, v));
+  // Bumping the session version signs every device out (after a PIN or password change, or on request).
+  const sessionVersion = async () => +((await R.get(`select value from settings where key = 'session_ver'`))?.value || 0);
+  const bumpSessions = tx(async q => {
+    const v = +((await q.get(`select value from settings where key = 'session_ver'`))?.value || 0) + 1;
+    await put(q, 'session_ver', v);
+    return v;
+  });
+
+  // staff: each person has a name and their own PIN, so orders and bills record who did them
+  const staffList = () => R.all('select id, name, active from staff order by active desc, name');
+  const staffHashes = () => R.all('select id, name, pin_hash from staff where active = 1');
+  const staffById = id => R.get('select id, name, active from staff where id = ?', [+id || 0]);
+  const addStaff = tx(async (q, name, pinHash) => {
+    name = String(name || '').trim();
+    if (!name) throw bad('Enter the staff member’s name');
+    return q.get('select id, name, active from staff where id = ?', [await q.insert('insert into staff(name, pin_hash) values(?, ?)', [name, pinHash])]);
+  });
+  const updateStaff = tx(async (q, id, { name, active }, pinHash) => {
+    const s = await q.get('select * from staff where id = ?', [+id || 0]);
+    if (!s) throw bad('Staff member not found', 404);
+    name = name == null ? s.name : String(name).trim();
+    if (!name) throw bad('Enter the staff member’s name');
+    await q.run('update staff set name = ?, active = ?, pin_hash = ? where id = ?', [name, flag(active, s.active), pinHash || s.pin_hash, s.id]);
+    return q.get('select id, name, active from staff where id = ?', [s.id]);
   });
 
   // menu
@@ -122,33 +155,34 @@ async function openDb(conn) {
       const m = await q.get('select * from menu_items where id = ? and active = 1', [+l.menu_id || 0]);
       if (!m) throw bad('Menu item not found');
       // name and price are copied so later menu edits never change an existing order
-      await q.run('insert into order_items(order_id, name, price, gst_pct, qty, kot_no) values(?, ?, ?, ?, ?, ?)', [orderId, m.name, m.price, m.gst_pct, qty, kot]);
+      await q.run('insert into order_items(order_id, name, price, gst_pct, qty, kot_no, created_at) values(?, ?, ?, ?, ?, ?, ?)', [orderId, m.name, m.price, m.gst_pct, qty, kot, stamp()]);
     }
     return { id: orderId, kot_no: kot };
   }
-  const createOrder = tx(async (q, { kind, ref = '', note = '', items } = {}) => {
+  const createOrder = tx(async (q, { kind, ref = '', note = '', items, by = null } = {}) => {
     if (!KINDS.includes(kind)) throw bad('Order type must be table, room or takeaway');
     ref = String(ref).trim();
     if (kind !== 'takeaway' && !ref) throw bad(`Enter the ${kind} number`);
-    return addLines(q, await q.insert('insert into orders(kind, ref, note, created_at) values(?, ?, ?, ?)', [kind, ref, String(note).trim(), stamp()]), items);
+    return addLines(q, await q.insert('insert into orders(kind, ref, note, created_at, created_by) values(?, ?, ?, ?, ?)', [kind, ref, String(note).trim(), stamp(), by]), items);
   });
   const addItems = tx(async (q, id, items) => {
     if (!ACTIVE.includes((await order(q, id)).status)) throw bad('Order is already closed');
     return addLines(q, +id, items);
   });
-  const setStatus = tx(async (q, id, status, reason = '') => {
+  const setStatus = tx(async (q, id, status, reason = '', by = null) => {
     const o = await order(q, id);
     reason = String(reason || '').trim();
     if (status === 'cancelled') {
       if (!ACTIVE.includes(o.status)) throw bad('Order is already closed');
       if (!reason) throw bad('Give a reason for cancelling');
     } else if (NEXT[o.status] !== status) throw bad(`Cannot move order from ${o.status} to ${status}`);
-    await q.run('update orders set status = ?, cancel_reason = ? where id = ?', [status, status === 'cancelled' ? reason : null, o.id]);
+    const cancelled = status === 'cancelled';
+    await q.run('update orders set status = ?, cancel_reason = ?, cancelled_by = ? where id = ?', [status, cancelled ? reason : null, cancelled ? by : null, o.id]);
     return order(q, o.id);
   });
 
   const openFolioId = async (q, room) => (await q.get('select id from room_folios where room_no = ? and settled_at is null', [room]))?.id;
-  const bill = tx(async (q, id, { discount = 0, pay_mode, room_no } = {}, now = new Date()) => {
+  const bill = tx(async (q, id, { discount = 0, pay_mode, room_no, by = null } = {}, now = new Date()) => {
     await q.run('select pg_advisory_xact_lock(1, 0)'); // one bill at a time, so bill numbers never collide
     const o = await order(q, id);
     if (!ACTIVE.includes(o.status)) throw bad('Order is already closed');
@@ -166,23 +200,45 @@ async function openDb(conn) {
     // GST invoice numbers: continuous within a financial year, e.g. FY26-27/0001
     const prefix = fy(at) + '/';
     const seq = (await q.get('select coalesce(max(cast(substr(bill_no, ?) as integer)), 0) + 1 n from orders where bill_no like ?', [prefix.length + 1, prefix + '%'])).n;
-    await q.run(`update orders set status = 'billed', bill_no = ?, discount = ?, subtotal = ?, tax = ?, total = ?, pay_mode = ?, folio_id = ?, billed_at = ? where id = ?`,
-      [prefix + String(seq).padStart(4, '0'), t.discount, t.subtotal, t.tax, t.total, pay_mode, folio, at, o.id]);
+    await q.run(`update orders set status = 'billed', bill_no = ?, discount = ?, subtotal = ?, tax = ?, total = ?, pay_mode = ?, folio_id = ?, billed_at = ?, billed_by = ? where id = ?`,
+      [prefix + String(seq).padStart(4, '0'), t.discount, t.subtotal, t.tax, t.total, pay_mode, folio, at, by, o.id]);
     return order(q, o.id);
   });
+
+  // A wrong bill is voided, never deleted: its number stays used (GST invoices must be continuous) and it drops out of totals.
+  const voidBill = tx(async (q, id, reason, by = null) => {
+    const o = await order(q, id);
+    if (o.status !== 'billed') throw bad('Only a billed order can be voided');
+    reason = String(reason || '').trim();
+    if (!reason) throw bad('Give a reason for voiding this bill');
+    if (o.folio_id && (await q.get('select settled_at from room_folios where id = ?', [o.folio_id]))?.settled_at)
+      throw bad('This bill is part of a room bill that is already settled');
+    await q.run(`update orders set status = 'void', void_reason = ?, voided_by = ?, voided_at = ? where id = ?`, [reason, by, stamp(), o.id]);
+    return order(q, o.id);
+  });
+
+  // Everything, for the owner's backup download.
+  const backup = async () => {
+    const out = { app: 'hotelorderbooking', exported_at: stamp(), tables: {} };
+    for (const t of ['settings', 'menu_items', 'orders', 'order_items', 'room_folios', 'staff'])
+      out.tables[t] = await R.all(`select * from ${t} order by 1`);
+    out.tables.settings = out.tables.settings.filter(r => !/hash/.test(r.key));
+    out.tables.staff = out.tables.staff.map(({ pin_hash, ...s }) => s); // PINs never leave the database
+    return out;
+  };
 
   // New KOTs since item id `after`, for devices that print them automatically.
   async function kots(after) {
     const last = (await R.get('select coalesce(max(id), 0)::int last from order_items')).last;
     if (after == null || after === '') return { last, kots: [] }; // first call just sets the starting point
-    return { last, kots: await R.all('select order_id, kot_no from order_items where id > ? and id <= ? group by order_id, kot_no order by min(id)', [+after || 0, last]) };
+    return { last, kots: await R.all('select order_id, kot_no, min(created_at) created_at from order_items where id > ? and id <= ? group by order_id, kot_no order by min(id)', [+after || 0, last]) };
   }
 
   // room folios (charge to room, settle at checkout)
   async function folio(q, id) {
     const f = await q.get('select * from room_folios where id = ?', [+id || 0]);
     if (!f) throw bad('Room bill not found', 404);
-    f.orders = await withItems(q, await q.all('select * from orders where folio_id = ? order by id', [f.id]));
+    f.orders = await withItems(q, await q.all(`select * from orders where folio_id = ? and status = 'billed' order by id`, [f.id]));
     f.total = r2(f.orders.reduce((s, o) => s + o.total, 0));
     return f;
   }
@@ -224,22 +280,27 @@ async function openDb(conn) {
     }
     if (name === 'items') return R.all(`select i.name item, sum(i.qty)::int qty, ${R2('sum(i.price * i.qty)')} amount from order_items i
       join orders o on o.id = i.order_id where o.status = 'billed' and left(o.billed_at, 10) between ? and ? group by i.name order by amount desc`, range);
-    if (name === 'cancelled') return R.all(`select o.id, o.kind, o.ref, o.created_at, o.cancel_reason reason, ${R2('coalesce(sum(i.price * i.qty), 0)')} value
+    if (name === 'bills') return R.all(`select id, bill_no, billed_at, case kind when 'takeaway' then 'Takeaway' else initcap(kind) || ' ' || ref end "for",
+      pay_mode payment, total, status, coalesce(billed_by, '') billed_by, coalesce(void_reason, '') void_reason
+      from orders where status in ('billed', 'void') and left(billed_at, 10) between ? and ? order by billed_at, id`, range);
+    if (name === 'cancelled') return R.all(`select o.id, o.kind, o.ref, o.created_at, o.cancel_reason reason, coalesce(o.cancelled_by, '') cancelled_by, ${R2('coalesce(sum(i.price * i.qty), 0)')} value
       from orders o left join order_items i on i.order_id = o.id where o.status = 'cancelled' and left(o.created_at, 10) between ? and ? group by o.id order by o.id`, range);
     throw bad('Unknown report', 404);
   }
 
   // failed-login lockout per IP (kept in the database because serverless functions don't share memory)
   const loginBlocked = async ip => ((await R.get('select until from login_attempts where ip = ?', [ip]))?.until || 0) > Date.now();
-  const loginFailed = tx(async (q, ip) => {
+  // key is a device or an address; max = wrong tries before a 15-minute lock
+  const loginFailed = tx(async (q, ip, max = 5) => {
     const n = ((await q.get('select n from login_attempts where ip = ?', [ip]))?.n || 0) + 1;
     await q.run('insert into login_attempts(ip, n, until) values(?, ?, ?) on conflict(ip) do update set n = excluded.n, until = excluded.until',
-      n >= 5 ? [ip, 0, Date.now() + 15 * 60e3] : [ip, n, 0]);
+      n >= max ? [ip, 0, Date.now() + 15 * 60e3] : [ip, n, 0]);
   });
   const loginOk = ip => R.run('delete from login_attempts where ip = ?', [ip]);
 
   return {
-    settings, saveSettings, menu, addMenuItem, updateMenuItem,
+    settings, saveSettings, setSetting, sessionVersion, bumpSessions, staffList, staffHashes, staffById, addStaff, updateStaff,
+    voidBill, backup, menu, addMenuItem, updateMenuItem,
     order: id => order(R, id), activeOrders, createOrder, addItems, setStatus, bill, kots,
     folio: id => folio(R, id), openFolios, openFolio, settleFolio, report,
     loginBlocked, loginFailed, loginOk,

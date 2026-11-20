@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>Hotel site address</title>
+<style>
+  body { margin: 0; padding: 28px; font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1B1A17; background: #F5F3EE; }
+  h1 { font-size: 22px; margin: 0 0 6px; } p { margin: 0 0 18px; color: #5E5A53; }
+  label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: #4A4740; }
+  input { min-height: 44px; padding: 0 12px; border: 1px solid #DCD7CE; border-radius: 10px; font-size: 15px; }
+  button { margin-top: 16px; min-height: 44px; padding: 0 20px; border: 0; border-radius: 10px; background: #F4A53C; font-weight: 700; font-size: 15px; cursor: pointer; }
+  #err { color: #8A3412; font-weight: 600; min-height: 20px; margin-top: 10px; }
+</style>
+</head>
+<body>
+  <h1>Hotel site address</h1>
+  <p>The web address of your hotel's Hotel Orders site. Saved on this computer only.</p>
+  <form id="f">
+    <label>Address<input id="url" type="url" required placeholder="https://yourhotel.netlify.app"></label>
+    <button>Save and open</button>
+    <div id="err" role="alert"></div>
+  </form>
+<script>
+  window.desktop.getUrl().then(u => { document.getElementById('url').value = u || ''; });
+  document.getElementById('f').onsubmit = async e => {
+    e.preventDefault();
+    const r = await window.desktop.setUrl(document.getElementById('url').value);
+    if (r !== 'ok') document.getElementById('err').textContent = r;
+  };
+</script>
+</body>
+</html>

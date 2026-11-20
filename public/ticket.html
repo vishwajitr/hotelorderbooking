@@ -37,7 +37,7 @@ function kotHtml(o) {
 }
 function billHtml(s, o) {
   const t = o.totals, billed = o.status === 'billed';
-  return head(s) + `<div class="c big">${billed ? 'TAX INVOICE' : 'ESTIMATE (not billed)'}</div>
+  return head(s) + `<div class="c big">${billed ? 'TAX INVOICE' : o.status === 'void' ? 'VOID: ' + esc(o.void_reason) : 'ESTIMATE (not billed)'}</div>
     Bill: ${esc(o.bill_no || '-')}<br>${label(o)}<br>${esc(o.billed_at || new Date().toLocaleString('en-IN'))}<hr>
     <table><tr><td>Item</td><td class="r">Qty</td><td class="r">Amount</td></tr>
     ${o.items.map(i => `<tr><td>${esc(i.name)}</td><td class="r">${i.qty}</td><td class="r">${money(i.price * i.qty)}</td></tr>`).join('')}</table><hr>

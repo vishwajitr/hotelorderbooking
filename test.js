@@ -19,7 +19,7 @@ const { pgliteConn } = require('./local-db');
   assert.strictEqual(r.kot_no, 1);
   r = await db.addItems(r.id, [{ menu_id: dosa.id, qty: 1 }]);
   assert.strictEqual(r.kot_no, 2);
-  assert.deepStrictEqual((await db.kots(k.last)).kots, [{ order_id: r.id, kot_no: 1 }, { order_id: r.id, kot_no: 2 }]);
+  assert.deepStrictEqual((await db.kots(k.last)).kots.map(({ order_id, kot_no }) => [order_id, kot_no]), [[r.id, 1], [r.id, 2]]);
 
   await db.updateMenuItem(dosa.id, { name: 'Dosa', price: 999, gst_pct: 5 }); // must not change the existing order
   await assert.rejects(db.setStatus(r.id, 'served'), /Cannot move/);
@@ -54,6 +54,28 @@ const { pgliteConn } = require('./local-db');
   assert.deepStrictEqual([sum.bills, sum.gross, sum.net, sum.tax, sum.cgst, sum.sgst], [3, 1202.25, 1145, 57.25, 28.63, 28.62]);
   assert.deepStrictEqual(sum.byType.map(r => [r.kind, r.bills]), [['room', 2], ['table', 1]]);
   assert.strictEqual((await db.report('cancelled', stamp().slice(0, 10), stamp().slice(0, 10)))[0].value, 20);
+
+  // who did it, voiding a bill (number kept, drops out of totals), staff, session version, backup
+  const v1 = await db.createOrder({ kind: 'table', ref: '9', items: [{ menu_id: tea.id, qty: 1 }], by: 'Ravi' });
+  const vb = await db.bill(v1.id, { pay_mode: 'cash', by: 'Ravi' }, new Date(2027, 3, 2, 12));
+  assert.deepStrictEqual([vb.created_by, vb.billed_by, vb.bill_no], ['Ravi', 'Ravi', 'FY27-28/0003']);
+  await assert.rejects(db.voidBill(v1.id, ''), /reason/);
+  const vd = await db.voidBill(v1.id, 'wrong table', 'Owner');
+  assert.deepStrictEqual([vd.status, vd.bill_no, vd.voided_by], ['void', 'FY27-28/0003', 'Owner']);
+  assert.strictEqual((await db.report('summary', '2027-04-02', '2027-04-02')).bills, 0);
+  assert.strictEqual((await db.report('bills', '2027-04-02', '2027-04-02'))[0].status, 'void');
+  const v2 = await db.createOrder({ kind: 'takeaway', items: [{ menu_id: tea.id, qty: 1 }] });
+  assert.strictEqual((await db.bill(v2.id, { pay_mode: 'upi' }, new Date(2027, 3, 2, 13))).bill_no, 'FY27-28/0004'); // no reuse
+  await assert.rejects(db.voidBill(r2.id, 'x'), /already settled/); // room bill already checked out
+
+  const ravi = await db.addStaff('Ravi', 'salt:hash');
+  assert.deepStrictEqual((await db.staffList()).map(s => s.name), ['Ravi']);
+  await db.updateStaff(ravi.id, { active: false });
+  assert.strictEqual((await db.staffHashes()).length, 0);
+  const ver = await db.sessionVersion();
+  assert.strictEqual(await db.bumpSessions(), ver + 1);
+  const dump = await db.backup();
+  assert.ok(dump.tables.orders.length > 5 && dump.tables.staff.every(s => !('pin_hash' in s)));
 
   // login lockout after 5 wrong attempts
   for (let i = 0; i < 4; i++) await db.loginFailed('1.2.3.4');
