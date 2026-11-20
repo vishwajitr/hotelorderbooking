@@ -220,11 +220,11 @@ $('#menuTable').onclick = async e => {
 $('#menuForm').onsubmit = async e => {
   e.preventDefault();
   const el = e.target.elements;
-  await api('/menu', { category: el.category.value, name: el.item.value, price: el.price.value, gst_pct: el.gst_pct.value, veg: el.veg.checked });
+  await api('/menu', { category: el.category.value, name: el.item_name.value, price: el.price.value, gst_pct: el.gst_pct.value, veg: el.veg.checked });
   const cat = el.category.value;
   e.target.reset();
   el.category.value = cat; // keep category for adding the next item quickly
-  el.item.focus();
+  el.item_name.focus();
 };
 
 async function loadSettings() {
