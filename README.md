@@ -5,6 +5,8 @@ It runs as a website on Netlify (any phone, tablet or PC) and as a desktop app (
 
 Live site: https://hotelorderbooking.netlify.app (deploys automatically on every push to `main`).
 
+**Setting up a new hotel?** Follow [SETUP.md](SETUP.md): site, hardware, on-site setup, test run, training and handover.
+
 ---
 
 ## For the hotel: daily use
