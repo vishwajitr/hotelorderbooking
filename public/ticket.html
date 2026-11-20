@@ -6,8 +6,9 @@
 <!-- One template for KOT, bill and room statement. ?type=kot|bill|folio&id=N[&kot=N][&auto=1] -->
 <style>
   @page { margin: 0; }
-  body { font: 12px/1.35 "Courier New", monospace; margin: 0; padding: 3mm; width: 80mm; color: #000; }
-  body.w58 { width: 58mm; font-size: 11px; }
+  /* printable width: 80mm paper prints ~72mm, 58mm paper ~48mm */
+  body { font: 12px/1.35 "Courier New", monospace; margin: 0; padding: 2mm; width: 72mm; box-sizing: border-box; color: #000; }
+  body.w58 { width: 48mm; font-size: 11px; }
   h1 { font-size: 15px; margin: 0; }
   hr { border: 0; border-top: 1px dashed #000; margin: 4px 0; }
   table { width: 100%; border-collapse: collapse; }
@@ -57,7 +58,7 @@ function folioHtml(s, f) {
     const s = await get('/api/settings');
     if (s.paper_width === '58') document.body.className = 'w58';
     const html = type === 'folio' ? folioHtml(s, await get('/api/folios/' + id))
-      : type === 'bill' ? billHtml(s, await get('/api/orders/' + id))
+      : type === 'bill' ? billHtml(s, await get('/api/orders/' + id + (q.has('discount') ? '?discount=' + encodeURIComponent(q.get('discount')) : '')))
       : kotHtml(await get('/api/orders/' + id));
     document.getElementById('t').innerHTML = html;
     document.title = 'ready'; // Electron waits for this before printing

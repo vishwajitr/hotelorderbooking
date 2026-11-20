@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const { EventEmitter } = require('events');
-const { openDb } = require('./db');
+const { openDb, totals } = require('./db');
 
 const LOCAL = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
@@ -75,7 +75,13 @@ async function start(dbPath, port = 4600) {
   app.put('/api/menu/:id', h(req => changed(db.updateMenuItem(id(req), req.body))));
 
   app.get('/api/orders', h(() => db.activeOrders()));
-  app.get('/api/orders/:id', h(req => db.order(id(req))));
+  app.get('/api/orders/:id', h(req => {
+    const o = db.order(id(req));
+    // ?discount=N previews totals before billing; the real discount is validated and saved by /bill
+    if (req.query.discount !== undefined && o.status !== 'billed')
+      o.totals = totals(o.items, Math.min(Math.max(+req.query.discount || 0, 0), o.totals.subtotal));
+    return o;
+  }));
   app.post('/api/orders', h(req => changed(db.createOrder(req.body), true)));
   app.post('/api/orders/:id/items', h(req => changed(db.addItems(id(req), req.body.items), true)));
   app.post('/api/orders/:id/status', h(req => changed(db.setStatus(id(req), req.body.status, req.body.reason))));

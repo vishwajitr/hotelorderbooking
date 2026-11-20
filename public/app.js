@@ -135,12 +135,22 @@ $('#live').onclick = async e => {
     if (f) await api(`/orders/${o.id}/status`, { status: 'cancelled', reason: f.reason });
   }
   if (act === 'bill') {
-    const t = o.totals;
-    const f = await ask(`Bill: ${esc(label(o))}`, `
-      <p>Subtotal ${money(t.subtotal)} · GST ${money(t.tax)} · <b>Total ${money(t.total)}</b> (before discount)</p>
-      <label>Discount ₹ <input name="discount" type="number" min="0" max="${t.subtotal}" step="0.01" value="0"></label>
-      <label>Payment <select name="pay_mode">${PAY_OPTS}<option value="room">Charge to room</option></select></label>
-      ${o.kind === 'room' ? '' : '<label>Room no. (only if charging to a room) <input name="room_no"></label>'}`, 'Bill & print');
+    const t = o.totals, src = d => `/ticket.html?type=bill&id=${o.id}&discount=${encodeURIComponent(d || 0)}`;
+    const answer = ask(`Bill: ${esc(label(o))}`, `<div class="bill-dialog">
+      <iframe class="bill-preview" src="${src(0)}" title="Bill preview"></iframe>
+      <div>
+        <label>Discount ₹ <input name="discount" type="number" min="0" max="${t.subtotal}" step="0.01" value="0"></label>
+        <label>Payment <select name="pay_mode">${PAY_OPTS}<option value="room">Charge to room</option></select></label>
+        ${o.kind === 'room' ? '' : '<label>Room no. (only if charging to a room) <input name="room_no"></label>'}
+        <p class="muted">The preview updates as you change the discount. Nothing is billed until you press Bill &amp; print.</p>
+      </div></div>`, 'Bill & print');
+    // live preview: reload the ticket with the typed discount (debounced so typing stays smooth)
+    let timer;
+    $('#dlg [name=discount]').oninput = e => {
+      clearTimeout(timer);
+      timer = setTimeout(() => ($('#dlg .bill-preview').src = src(e.target.value)), 300);
+    };
+    const f = await answer;
     if (!f) return;
     const billed = await api(`/orders/${o.id}/bill`, f);
     print('bill', billed.id);
