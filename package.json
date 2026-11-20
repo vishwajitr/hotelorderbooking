@@ -39,6 +39,7 @@
     }
   },
   "dependencies": {
+    "@netlify/database": "^2.0.3",
     "express": "^4.22.3",
     "pg": "^8.23.1",
     "serverless-http": "^4.0.0"
