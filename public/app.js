@@ -59,7 +59,8 @@ $$('.tabs [data-tab]').forEach(b => (b.onclick = () => show(b.dataset.tab)));
 
 // ---------- new order ----------
 const active = () => menu.filter(m => m.active);
-const categories = () => [...new Set(menu.map(m => m.category).filter(Boolean))].sort();
+let cats = []; // [{ name, dishes }] from the server: saved categories, including empty ones
+const categories = () => cats.map(c => c.name);
 function renderCats() {
   const list = ['All', ...new Set(active().map(m => m.category || 'Other'))];
   if (!list.includes(cat)) cat = 'All';
@@ -331,6 +332,31 @@ $('#menuForm').elements.category.onchange = () => {
   $('#newCatField').hidden = !isNew;
   $('#menuForm').elements.new_category.required = isNew;
 };
+function renderCatChips() {
+  $('#catChips').innerHTML = cats.map(c => `<span class="cat-chip">${esc(c.name)} <span class="n">${c.dishes}</span>
+    <button type="button" data-cat-rename="${esc(c.name)}" aria-label="Rename ${esc(c.name)}">Rename</button>
+    <button type="button" data-cat-delete="${esc(c.name)}" aria-label="Remove ${esc(c.name)}">✕</button></span>`).join('')
+    || '<span class="muted small">No categories yet. Add one below, then add dishes to it.</span>';
+}
+$('#catForm').onsubmit = async e => {
+  e.preventDefault();
+  await api('/categories', { name: e.target.elements.name.value });
+  e.target.reset();
+  await refresh();
+};
+$('#catChips').onclick = async e => {
+  const r = e.target.closest('[data-cat-rename]'), d = e.target.closest('[data-cat-delete]');
+  if (r) {
+    const from = r.dataset.catRename;
+    const f = await ask(`Rename ${esc(from)}`, `<label class="field">New name<input name="to" value="${esc(from)}" required maxlength="40"></label>
+      <p class="muted small">Dishes in this category move with it.</p>`, 'Rename');
+    if (f && f.to.trim() !== from) { await api('/categories', { from, to: f.to }, 'PUT'); await refresh(); }
+  }
+  if (d && confirm(`Remove the category "${d.dataset.catDelete}"?`)) {
+    await api('/categories/' + encodeURIComponent(d.dataset.catDelete), null, 'DELETE');
+    await refresh();
+  }
+};
 $('#vegSeg').onclick = e => { const b = e.target.closest('[data-veg]'); if (b) { newVeg = +b.dataset.veg; press('#vegSeg', 'data-veg', newVeg); } };
 
 function renderMenuTable() {
@@ -398,7 +424,7 @@ $('#menuForm').onsubmit = async e => {
   const el = e.target.elements;
   const category = el.category.value === '__new' ? el.new_category.value.trim() : el.category.value;
   await api('/menu', { category, name: el.item_name.value, price: el.price.value, gst_pct: el.gst_pct.value, veg: !!newVeg });
-  menu.push({ category }); // so a new category is in the dropdown right away
+  if (!cats.some(c => c.name === category)) cats.push({ name: category, dishes: 1 }); // in the dropdown right away
   e.target.reset();
   renderCategorySelect();
   el.category.value = category; // keep category for adding the next item quickly
@@ -493,7 +519,8 @@ async function pollKots() {
 
 // ---------- boot ----------
 async function refresh() {
-  [menu, orders, folios] = await Promise.all([api('/menu'), api('/orders'), api('/folios')]);
+  [menu, orders, folios, cats] = await Promise.all([api('/menu'), api('/orders'), api('/folios'), api('/categories')]);
+  renderCatChips();
   renderCats(); renderMenu(); renderCart(); renderBoard(); renderFolios(); renderMenuTable(); renderCategorySelect();
   if (addingTo && !orders.some(o => o.id === addingTo.id)) { addingTo = null; renderAdding(); } // billed/cancelled elsewhere
 }

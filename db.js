@@ -16,6 +16,7 @@ create table if not exists room_folios(id serial primary key, room_no text not n
 create table if not exists settings(key text primary key, value text not null);
 create table if not exists login_attempts(ip text primary key, n integer not null default 0, until double precision not null default 0);
 create table if not exists staff(id serial primary key, name text not null, pin_hash text not null, active integer not null default 1);
+create table if not exists categories(name text primary key);
 alter table orders add column if not exists created_by text;
 alter table orders add column if not exists billed_by text;
 alter table orders add column if not exists cancelled_by text;
@@ -128,6 +129,38 @@ async function openDb(conn) {
     if (!(await menuItem(q, id))) throw bad('Menu item not found', 404);
     await q.run('update menu_items set category = ?, name = ?, price = ?, gst_pct = ?, veg = ?, active = ? where id = ?', [...cleanItem(m), flag(m.active, 1), id]);
     return menuItem(q, id);
+  });
+
+  // categories: saved ones (may be empty) plus any a dish uses, each with its dish count
+  const categoryList = () => R.all(`select c.name, count(m.id)::int dishes from
+      (select name from categories union select category from menu_items where category <> '') c
+      left join menu_items m on m.category = c.name group by c.name order by lower(c.name)`);
+  const cleanCat = n => {
+    n = String(n || '').trim();
+    if (!n || n.length > 40) throw bad('Category name must be 1 to 40 characters');
+    return n;
+  };
+  const addCategory = tx(async (q, name) => {
+    name = cleanCat(name);
+    if (await q.get(`select 1 from (select name from categories union select category from menu_items) c where lower(name) = lower(?)`, [name]))
+      throw bad(`"${name}" already exists`);
+    await q.run('insert into categories(name) values(?)', [name]);
+    return { name, dishes: 0 };
+  });
+  const renameCategory = tx(async (q, from, to) => {
+    to = cleanCat(to);
+    if (from !== to && await q.get(`select 1 from (select name from categories union select category from menu_items) c where lower(name) = lower(?) and name <> ?`, [to, from]))
+      throw bad(`"${to}" already exists`);
+    await q.run('delete from categories where name = ?', [from]);
+    await q.run('insert into categories(name) values(?) on conflict do nothing', [to]);
+    await q.run('update menu_items set category = ? where category = ?', [to, from]); // dishes move with it
+    return { name: to };
+  });
+  const deleteCategory = tx(async (q, name) => {
+    const n = (await q.get('select count(*)::int n from menu_items where category = ?', [name])).n;
+    if (n) throw bad(`"${name}" still has ${n} ${n === 1 ? 'dish' : 'dishes'}. Move or delete them first.`);
+    await q.run('delete from categories where name = ?', [name]);
+    return { ok: true };
   });
 
   // Bulk add from a menu file or a backup's menu_items; dishes already on the menu (same name and category) are skipped.
@@ -314,7 +347,7 @@ async function openDb(conn) {
 
   return {
     settings, saveSettings, setSetting, sessionVersion, bumpSessions, staffList, staffHashes, staffById, addStaff, updateStaff,
-    voidBill, backup, menu, addMenuItem, updateMenuItem, importMenu,
+    voidBill, backup, menu, addMenuItem, updateMenuItem, importMenu, categoryList, addCategory, renameCategory, deleteCategory,
     order: id => order(R, id), activeOrders, createOrder, addItems, setStatus, bill, kots,
     folio: id => folio(R, id), openFolios, openFolio, settleFolio, report,
     loginBlocked, loginFailed, loginOk,

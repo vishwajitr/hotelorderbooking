@@ -237,3 +237,11 @@ body:not(.is-owner) .owner-only { display: none !important; }
 .security-form { display: flex; flex-direction: column; gap: 12px; }
 .status-void { color: var(--nonveg); font-weight: 700; }
 #who:empty { display: none; }
+
+.cat-manager { margin: 0 20px 16px; display: flex; flex-direction: column; gap: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.cat-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--chip); border-radius: 999px; padding: 2px 4px 2px 14px; font-size: 14px; font-weight: 600; }
+.cat-chip .n { font-size: 12px; color: var(--muted); font-weight: 500; margin-right: 4px; }
+.cat-chip button { border: 0; background: transparent; min-width: 36px; min-height: 36px; border-radius: 999px; cursor: pointer; color: var(--ink2); font-size: 13px; }
+.cat-chip button:hover { background: var(--card); }
+.cat-input { min-height: 44px; padding: 0 12px; border: 1px solid var(--input); border-radius: 10px; font-size: 15px; width: 260px; }

@@ -127,6 +127,14 @@
           <label class="search soft"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
             <input id="menuSearch" type="search" placeholder="Search items…" aria-label="Search menu items"></label>
         </div>
+        <div class="cat-manager">
+          <div class="strong">Categories</div>
+          <div id="catChips" class="chips"></div>
+          <form id="catForm" class="row" aria-label="Add a category">
+            <input name="name" placeholder="New category, e.g. Chinese" required maxlength="40" aria-label="New category name" class="cat-input">
+            <button class="btn">Add category</button>
+          </form>
+        </div>
         <form id="menuForm" class="add-form" aria-label="Add a menu item">
           <label class="field">Category<select name="category" required></select></label>
           <label class="field" id="newCatField" hidden>New category<input name="new_category" placeholder="e.g. Chinese"></label>

@@ -81,6 +81,17 @@ const { pgliteConn } = require('./local-db');
   assert.deepStrictEqual(await db.importMenu([{ name: 'tea', price: 25 }, { category: 'Sweets', name: 'Jalebi', price: 40, veg: 1 }]), { added: 1, skipped: 1 });
   await assert.rejects(db.importMenu([{ name: '', price: 1 }]), /needs a name/);
 
+  // categories: empty ones allowed, no duplicates, rename moves dishes, can't remove one with dishes
+  await db.addCategory('Chinese');
+  await assert.rejects(db.addCategory('chinese'), /already exists/);
+  await assert.rejects(db.addCategory('sweets'), /already exists/); // already used by a dish (Jalebi)
+  assert.deepStrictEqual((await db.categoryList()).find(c => c.name === 'Chinese'), { name: 'Chinese', dishes: 0 });
+  await db.renameCategory('Sweets', 'Mithai');
+  assert.strictEqual((await db.menu()).find(m => m.name === 'Jalebi').category, 'Mithai');
+  await assert.rejects(db.deleteCategory('Mithai'), /still has 1 dish/);
+  await db.deleteCategory('Chinese');
+  assert.ok(!(await db.categoryList()).some(c => c.name === 'Chinese'));
+
   // login lockout after 5 wrong attempts
   for (let i = 0; i < 4; i++) await db.loginFailed('1.2.3.4');
   assert.strictEqual(await db.loginBlocked('1.2.3.4'), false);

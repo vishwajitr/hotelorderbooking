@@ -164,6 +164,10 @@ async function createApp(conn, { serveStatic = false } = {}) {
   api.post('/menu', ownerOnly, h(req => db.addMenuItem(req.body)));
   api.put('/menu/:id', ownerOnly, h(req => db.updateMenuItem(id(req), req.body)));
   api.post('/menu/import', ownerOnly, h(req => db.importMenu(req.body.items)));
+  api.get('/categories', h(() => db.categoryList()));
+  api.post('/categories', ownerOnly, h(req => db.addCategory(req.body.name)));
+  api.put('/categories', ownerOnly, h(req => db.renameCategory(String(req.body.from || ''), req.body.to)));
+  api.delete('/categories/:name', ownerOnly, h(req => db.deleteCategory(req.params.name)));
 
   api.get('/orders', h(() => db.activeOrders()));
   api.get('/orders/:id', h(async req => {
