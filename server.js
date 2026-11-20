@@ -64,7 +64,7 @@ async function createApp(conn, { serveStatic = false } = {}) {
   const pinTaken = async (pin, exceptId) => (await db.staffHashes()).some(s => s.id !== exceptId && checkPin(pin, s.pin_hash));
 
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '2mb' }));
   if (serveStatic) app.use(express.static(path.join(__dirname, 'public')));
 
   const api = express.Router();
@@ -163,6 +163,7 @@ async function createApp(conn, { serveStatic = false } = {}) {
   api.get('/menu', h(() => db.menu()));
   api.post('/menu', ownerOnly, h(req => db.addMenuItem(req.body)));
   api.put('/menu/:id', ownerOnly, h(req => db.updateMenuItem(id(req), req.body)));
+  api.post('/menu/import', ownerOnly, h(req => db.importMenu(req.body.items)));
 
   api.get('/orders', h(() => db.activeOrders()));
   api.get('/orders/:id', h(async req => {

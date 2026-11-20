@@ -77,6 +77,10 @@ const { pgliteConn } = require('./local-db');
   const dump = await db.backup();
   assert.ok(dump.tables.orders.length > 5 && dump.tables.staff.every(s => !('pin_hash' in s)));
 
+  // menu import skips dishes already on the menu
+  assert.deepStrictEqual(await db.importMenu([{ name: 'tea', price: 25 }, { category: 'Sweets', name: 'Jalebi', price: 40, veg: 1 }]), { added: 1, skipped: 1 });
+  await assert.rejects(db.importMenu([{ name: '', price: 1 }]), /needs a name/);
+
   // login lockout after 5 wrong attempts
   for (let i = 0; i < 4; i++) await db.loginFailed('1.2.3.4');
   assert.strictEqual(await db.loginBlocked('1.2.3.4'), false);

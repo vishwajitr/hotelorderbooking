@@ -130,6 +130,20 @@ async function openDb(conn) {
     return menuItem(q, id);
   });
 
+  // Bulk add from a menu file or a backup's menu_items; dishes already on the menu (same name and category) are skipped.
+  const importMenu = tx(async (q, items) => {
+    if (!Array.isArray(items) || !items.length) throw bad('The file has no dishes');
+    if (items.length > 2000) throw bad('Too many dishes in one file');
+    let added = 0, skipped = 0;
+    for (const m of items) {
+      const row = cleanItem(m);
+      if (await q.get('select id from menu_items where lower(name) = lower(?) and lower(category) = lower(?)', [row[1], row[0]])) { skipped++; continue; }
+      await q.run('insert into menu_items(category, name, price, gst_pct, veg, active) values(?, ?, ?, ?, ?, ?)', [...row, flag(m.active, 1)]);
+      added++;
+    }
+    return { added, skipped };
+  });
+
   // orders (items fetched in one query per list, not per order: the database is a network hop away)
   async function withItems(q, orders) {
     if (!orders.length) return orders;
@@ -300,7 +314,7 @@ async function openDb(conn) {
 
   return {
     settings, saveSettings, setSetting, sessionVersion, bumpSessions, staffList, staffHashes, staffById, addStaff, updateStaff,
-    voidBill, backup, menu, addMenuItem, updateMenuItem,
+    voidBill, backup, menu, addMenuItem, updateMenuItem, importMenu,
     order: id => order(R, id), activeOrders, createOrder, addItems, setStatus, bill, kots,
     folio: id => folio(R, id), openFolios, openFolio, settleFolio, report,
     loginBlocked, loginFailed, loginOk,

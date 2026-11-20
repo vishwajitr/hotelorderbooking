@@ -379,6 +379,19 @@ $('#saveMenu').onclick = async () => {
   $('#saveMenu').disabled = true;
   await refresh();
 };
+// Import a menu file (a list of dishes) or a backup file (uses its menu_items); existing dishes are skipped.
+$('#menuImport').onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  let data;
+  try { data = JSON.parse(await file.text()); } catch { return alert('That file is not a menu or backup file.'); }
+  const items = Array.isArray(data) ? data : data.tables?.menu_items || data.menu || [];
+  if (!items.length) return alert('No dishes found in that file.');
+  if (!confirm(`Add ${items.length} dishes? Dishes already on the menu are skipped.`)) return;
+  const r = await api('/menu/import', { items });
+  alert(`Added ${r.added} dishes${r.skipped ? `, skipped ${r.skipped} already on the menu` : ''}.`);
+};
 $('#menuSearch').oninput = () => { if (!dirty.size) renderMenuTable(); };
 $('#menuForm').onsubmit = async e => {
   e.preventDefault();
